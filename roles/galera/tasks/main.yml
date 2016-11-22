@@ -1,0 +1,178 @@
+---
+- name: Install the build dependencies for package "software-properties-common"
+  apt: name=software-properties-common state=build-dep
+  tags: [initial]
+
+- name: Add MariaDB repo key.
+  apt_key: keyserver=keyserver.ubuntu.com id=0xcbcb082a1bb943db
+  tags: [initial,keys]
+  
+- name: Add MariaDB repository.
+  apt_repository: repo='deb [arch=amd64,i386,ppc64el] ftp://ftp.ulak.net.tr/pub/MariaDB/repo/10.1/ubuntu trusty main' state=present
+  tags: [initial,repo]
+
+- name: Run the equivalent of "apt-get update" as a separate step
+  apt: update_cache=yes cache_valid_time=3600
+  tags: [initial,update]
+
+- name: MariaDB installed or not
+  shell: service mysql status warn=false
+  register: dbcheck
+  ignore_errors: True
+  tags: [initial,dbcheck]
+
+- name: Upgrade all packages to the latest version
+  apt: upgrade=full	
+  when: dbcheck.rc != 0
+  tags: [initial,upgrade]
+
+- name: Install python-mysqldb
+  apt: name=python-mysqldb state=latest
+  tags: [installation,python]
+
+- name: Install MariaDB with root password 
+  debconf:
+    name: mariadb-server
+    question: "{{ item }}"
+    vtype: password
+    value: "{{ db_root_pass }}"
+  with_items:
+    - mysql-server/root_password
+    - mysql-server/root_password_again
+  register: configure_install
+  tags: [installation,mariadb,password]
+
+- name: Install MariaDB with custom configuration
+  apt: name=mariadb-server state=latest
+  when: configure_install | success
+  register: install_mariadb
+  tags: [installation,mariadb]
+  
+- name: Install additional packages
+  apt: name={{ item }} state=latest
+  with_items:
+      - rsync
+      - galera-arbitrator-3
+      - galera
+  tags: [installation,mariadb]
+
+- name: Copy config file for MariaDB
+  template:
+    src: "my.cnf.j2"
+    dest: "{{ mysql_cnf_path }}"
+    owner: root
+    group: root
+    mode: 0644
+  tags: [configuration,mariadb]
+
+- name: Copy MariaDB configuration
+  ini_file: >
+    dest={{ mysql_cnf_path }}
+    section="{{ item.section }}"
+    option="{{ item.option }}"
+    value="{{ item.value }}"
+    backup=yes
+  with_items: "{{ mysql_cnf_values }}"
+  tags: [configuration,mariadb]
+
+- name: Prepare variables for Galera cluster
+  set_fact: 
+    nodes: "{{ groups[['galera'][0]][0] }},{{ groups[['galera'][0]][1] }}"
+    node_addr: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+    node_name: "{{ hostvars[inventory_hostname]['ansible_nodename'] }}"
+  tags: [configuration,galera]
+
+- debug: msg={{ nodes }}
+  tags: [configuration,galera]
+
+- name: Copy config file for Galera Cluster
+  template:
+    src: "galera.cnf.j2"
+    dest: "{{ galera_cnf_path }}"
+    owner: root
+    group: root
+    mode: 0644
+  tags: [configuration,galera]
+
+- name: Copy Galera Cluster configuration
+  ini_file: >
+    dest={{ galera_cnf_path }}
+    section="{{ item.section }}"
+    option="{{ item.option }}"
+    value="{{ item.value }}"
+    backup=yes
+  with_items: "{{ galera_cnf_values }}"
+  tags: [configuration,galera]
+ 
+- name: Start MariaDB with Galera Cluster - service mysql start --wsrep-new-cluster 
+  service: name=mysql state=started args="--wsrep-new-cluster" enabled=yes
+  when: inventory_hostname == groups['galera'][0]
+  register: galeraboot
+  tags: [startup]
+
+- name: Copy debian.cnf from master to second node
+  synchronize: src=/etc/mysql/debian.cnf dest=/etc/mysql/debian.cnf
+  delegate_to: "{{ groups[['galera'][0]][0] }}"
+  tags: [startup]
+
+- name: Restart the other MariaDB Galera cluster nodes
+  service: name=mysql state=started
+  when: inventory_hostname != groups['galera'][0] and galeraboot
+  ignore_errors: True
+  tags: [startup]
+
+- name: Create a new database
+  mysql_db: name={{ dbname }} state=present collation=utf8_general_ci
+  ignore_errors: True
+  tags: [dbuser]
+
+- name: Create a database user
+  mysql_user: name={{ dbuser }} password={{ upassword }} priv=*.*:ALL host=localhost state=present
+  ignore_errors: True
+  tags: [dbuser]
+ 
+- name: Set root Password
+  mysql_user: name={{ dbuser }} host={{ item }} password={{ upassword }} state=present
+  with_items:
+    - localhost
+    - 127.0.0.1
+    - ::1
+  ignore_errors: True
+  tags: [tunning]
+
+- name: Remove anonymous users
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - DELETE FROM mysql.user WHERE User=''
+  changed_when: False
+  when: inventory_hostname == groups['galera'][0]
+  ignore_errors: True
+  tags: [tunning]
+
+- name: Disallow root login remotely
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1')
+  changed_when: False
+  when: inventory_hostname == groups['galera'][0]
+  ignore_errors: True
+  tags: [tunning]
+
+- name: Remove test database and access to it
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - DROP DATABASE test
+    - DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%'
+  changed_when: False
+  ignore_errors: True
+  when: inventory_hostname == groups['galera'][0]
+  tags: [tunning]
+
+- name: Reload privilege tables
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - FLUSH PRIVILEGES
+  changed_when: False
+  when: inventory_hostname == groups['galera'][0]
+  ignore_errors: True
+  tags: [tunning]

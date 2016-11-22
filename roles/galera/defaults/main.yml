@@ -1,0 +1,33 @@
+---
+apt_cache_valid_time: 86400
+
+mysql_cnf_values:
+ - option: "port"
+   section: "mysqld"
+   value: "{{ db_port }}"
+ - option: "datadir"
+   section: "mysqld"
+   value: "{{ datadir }}"
+ - option: "max_connections"
+   section: "mysqld"
+   value: "{{ max_conn }}"
+ - option: "connect_timeout"
+   section: "mysqld"
+   value: "{{ conn_timeout }}"
+ - option: "wait_timeout"
+   section: "mysqld"
+   value: "{{ wait_time }}"
+
+galera_cnf_values:
+ - option: "wsrep_cluster_name"
+   section: "mysqld"
+   value: "{{ cluster_name }}"
+# - option: "wsrep_cluster_address"
+#   section: "mysqld"
+#   value: "{{ nodes }}"
+# - option: "wsrep_node_address"
+#   section: "mysqld"
+#   value: "{{ node_addr }}"
+# - option: "wsrep_node_name"
+#   section: "mysqld"
+#   value: "{{ node_name }}"

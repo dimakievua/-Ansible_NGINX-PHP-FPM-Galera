@@ -1,0 +1,25 @@
+---
+# The variables file used by the playbooks in the db group.
+# Config files:
+mysql_cnf_path: /etc/mysql/my.cnf
+galera_cnf_path: /etc/mysql/conf.d/galera.cnf
+# MariaDB values
+db_root_pass: secret
+mariadb_version: 10.1
+mysqlservice: mysqld
+mysql_port: 3306
+dbuser: test
+dbname: example
+upassword: testpw
+ansible_memtotal_mb: 50
+datadir: /var/lib/mysql
+max_conn: 1000
+db_port: 3306
+conn_timeout: 5
+wait_time: 600
+# Galera section
+cluster_name: '"my_claster"'
+node_addr: '"172.17.0.5"'
+node_name: '"c81bf875e12f"'
+nodes: '"gcomm://172.17.0.5,172.17.0.6"'
+
